@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Travel Expense Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        [v-cloak] { display: none !important; }
+        body { background-color: #f3f4f6; -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .custom-scroll::-webkit-scrollbar { width: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        input, select, button { font-size: 16px !important; } 
+    </style>
+</head>
+<body>
+    <div id="app" v-cloak class="max-w-md mx-auto min-h-screen flex flex-col" @click="showDropdown = false">
+        
+        <header class="bg-indigo-700 text-white p-5 shadow-xl sticky top-0 z-50 rounded-b-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-lg font-bold uppercase tracking-tight text-indigo-50">Expense Tracker</h1>
+                <div class="flex gap-2">
+                    <button @click="exportCSV" class="text-[10px] bg-green-600 px-3 py-1 rounded-full font-bold uppercase shadow-sm">CSV</button>
+                    <button @click="clearAll" class="text-[10px] bg-white/10 px-3 py-1 rounded-full font-bold uppercase hover:bg-red-500 transition-colors">Reset</button>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-2 mb-4">
+                <div class="bg-black/20 p-2 rounded-lg text-white">
+                    <label class="block text-[9px] uppercase font-bold opacity-70">Local Currency</label>
+                    <select v-model="fromCurrency" @change="updateRates" class="w-full bg-transparent border-none text-sm font-bold outline-none cursor-pointer">
+                        <option v-for="c in currencies" :key="c" :value="c" class="text-black">{{ c }}</option>
+                    </select>
+                </div>
+                <div class="bg-black/20 p-2 rounded-lg text-white">
+                    <label class="block text-[9px] uppercase font-bold opacity-70">Home Currency</label>
+                    <select v-model="toCurrency" @change="updateRates" class="w-full bg-transparent border-none text-sm font-bold outline-none cursor-pointer">
+                        <option v-for="c in currencies" :key="c" :value="c" class="text-black">{{ c }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="bg-white/10 backdrop-blur-md rounded-xl p-4 flex justify-between items-center border border-white/20">
+                <span class="text-xs font-semibold uppercase italic">Total Trip Spend</span>
+                <span class="text-2xl font-black">{{ toCurrency }} {{ totalConverted.toLocaleString(undefined, {minimumFractionDigits: 2}) }}</span>
+            </div>
+        </header>
+
+        <main class="flex-grow p-4 pb-24">
+            <div class="bg-white rounded-2xl p-4 shadow-sm mb-6 border-2 transition-all" :class="editingId ? 'border-orange-400' : 'border-transparent'">
+                <div class="flex justify-between items-center mb-2" v-if="editingId">
+                    <span class="text-xs font-bold text-orange-500 uppercase flex items-center gap-1">
+                        <span class="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
+                        Editing Mode
+                    </span>
+                    <button @click="cancelEdit" class="text-xs text-gray-400 underline">Cancel</button>
+                </div>
+                
+                <div class="grid grid-cols-3 gap-2 mb-2">
+                    <input v-model="newItem" type="text" placeholder="Item Name" class="col-span-2 border-gray-200 border rounded-lg p-3 text-sm outline-none focus:border-indigo-500">
+                    <input v-model.number="newCost" type="number" inputmode="decimal" placeholder="0.00" class="col-span-1 border-gray-200 border rounded-lg p-3 text-sm outline-none focus:border-indigo-500">
+                </div>
+                
+                <div class="grid grid-cols-2 gap-2 mb-3">
+                    <div class="relative" @click.stop>
+                        <input v-model="newCategory" type="text" placeholder="Category" @focus="showDropdown = true" @blur="handleBlur" class="w-full border-gray-200 border rounded-lg p-3 text-sm outline-none focus:border-indigo-500">
+                        <div v-if="showDropdown && existingCategories.length > 0" class="absolute left-0 right-0 mt-1 bg-white border border-gray-200 shadow-2xl rounded-xl z-50 max-h-48 overflow-y-auto custom-scroll">
+                            <div v-for="cat in existingCategories" :key="cat" @mousedown="selectCategory(cat)" class="p-3 text-sm hover:bg-indigo-50 cursor-pointer border-b border-gray-50 last:border-none font-medium text-gray-700">
+                                {{ cat }}
+                            </div>
+                        </div>
+                    </div>
+                    <input v-model="newDate" type="date" class="border-gray-200 border rounded-lg p-3 text-sm outline-none focus:border-indigo-500">
+                </div>
+                
+                <button @click="addItem" :class="editingId ? 'bg-orange-500' : 'bg-indigo-600'" class="w-full text-white font-bold py-3 rounded-xl shadow-md transition-all uppercase tracking-widest text-sm">
+                    {{ editingId ? 'Update Entry' : 'Add Expense' }}
+                </button>
+            </div>
+
+            <div class="flex justify-center mb-6">
+                <div class="bg-gray-200 p-1 rounded-full flex w-full max-w-[300px] shadow-inner">
+                    <button @click="viewMode = 'category'" :class="viewMode === 'category' ? 'bg-white shadow text-indigo-700' : 'text-gray-500'" class="flex-1 py-2 rounded-full text-[10px] font-black uppercase transition-all tracking-widest">By Category</button>
+                    <button @click="viewMode = 'date'" :class="viewMode === 'date' ? 'bg-white shadow text-indigo-700' : 'text-gray-500'" class="flex-1 py-2 rounded-full text-[10px] font-black uppercase transition-all tracking-widest">By Date</button>
+                </div>
+            </div>
+
+            <div v-for="group in activeData" :key="group.title" class="mb-10">
+                <div @click="toggleCollapse(group.title)" class="flex justify-between items-end border-b-2 border-indigo-500 pb-1 mb-4 cursor-pointer select-none">
+                    <h2 class="text-indigo-900 font-black text-xl uppercase italic tracking-tight flex items-center gap-2">
+                        <span class="text-indigo-400 text-sm">{{ isCollapsed(group.title) ? '+' : '−' }}</span>
+                        {{ group.title }}
+                    </h2>
+                    <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
+                        {{ toCurrency }} {{ group.total.toFixed(2) }}
+                    </span>
+                </div>
+
+                <div v-if="!isCollapsed(group.title)">
+                    <div v-for="sub in group.subGroups" :key="sub.label" class="mb-4 ml-2">
+                        <h3 class="text-gray-400 font-bold text-[10px] uppercase tracking-widest mb-2 flex items-center justify-between">
+                            <span class="flex items-center">
+                                 <span class="w-4 h-[1px] bg-gray-300 mr-2"></span>
+                                 {{ sub.label }}
+                            </span>
+                            <span class="text-[9px] text-indigo-400 font-mono pr-2">
+                                 {{ toCurrency }} {{ sub.subTotal.toFixed(2) }}
+                            </span>
+                        </h3>
+                        
+                        <div class="space-y-2">
+                            <div v-for="item in sub.items" :key="item.id" class="bg-white rounded-xl p-3 flex justify-between items-center shadow-sm border border-gray-50">
+                                <div class="flex-1 mr-2 overflow-hidden">
+                                    <p class="font-bold text-gray-800 text-sm truncate">{{ item.name }}</p>
+                                    <p class="text-[10px] text-gray-400 uppercase tracking-tighter">{{ fromCurrency }} {{ item.cost.toFixed(2) }}</p>
+                                </div>
+                                <div class="text-right flex items-center gap-2">
+                                    <span class="font-bold text-gray-900 font-mono text-sm whitespace-nowrap">{{ toCurrency }} {{ (item.cost * rate).toFixed(2) }}</span>
+                                    <div class="flex">
+                                        <button @click.stop="editItem(item)" class="text-gray-300 hover:text-orange-500 p-2 transition-colors">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                        </button>
+                                        <button @click.stop="removeItem(item.id)" class="text-gray-300 hover:text-red-500 p-2 transition-colors">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="list.length === 0" class="text-center py-20 opacity-20">
+                <p class="text-5xl mb-2">🏔️</p>
+                <p class="text-xs font-bold uppercase tracking-widest">No expenses tracked yet</p>
+            </div>
+        </main>
+
+        <footer class="fixed bottom-0 left-0 right-0 bg-white/95 border-t p-3 text-center z-40 backdrop-blur-sm">
+            <p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Rate: 1 {{ fromCurrency }} = {{ rate.toFixed(4) }} {{ toCurrency }}</p>
+        </footer>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+
+        createApp({
+            setup() {
+                const STORAGE_KEY = 'travel_expense_pro_v14';
+                const fromCurrency = ref(localStorage.getItem('fromCur') || 'USD');
+                const toCurrency = ref(localStorage.getItem('toCur') || 'EUR');
+                const list = ref(JSON.parse(localStorage.getItem(STORAGE_KEY)) || []);
+                const currencies = ref([]);
+                const rate = ref(1);
+                const viewMode = ref('category'); 
+                const collapsedGroups = ref([]); // Tracks titles of collapsed sections
+
+                const newItem = ref('');
+                const newCost = ref(null);
+                const newCategory = ref(localStorage.getItem('lastCat') || '');
+                const newDate = ref(new Date().toISOString().substr(0, 10));
+                const showDropdown = ref(false);
+                const editingId = ref(null);
+
+                const updateRates = async () => {
+                    try {
+                        const res = await fetch(`https://open.er-api.com/v6/latest/${fromCurrency.value}`);
+                        const data = await res.json();
+                        currencies.value = Object.keys(data.rates);
+                        rate.value = data.rates[toCurrency.value] || 1;
+                        localStorage.setItem('fromCur', fromCurrency.value);
+                        localStorage.setItem('toCur', toCurrency.value);
+                    } catch (e) { console.error("API error."); }
+                };
+
+                const toggleCollapse = (title) => {
+                    const index = collapsedGroups.value.indexOf(title);
+                    if (index > -1) {
+                        collapsedGroups.value.splice(index, 1);
+                    } else {
+                        collapsedGroups.value.push(title);
+                    }
+                };
+
+                const isCollapsed = (title) => collapsedGroups.value.includes(title);
+
+                const existingCategories = computed(() => [...new Set(list.value.map(i => i.category))].filter(c => c).sort());
+
+                const activeData = computed(() => {
+                    if (viewMode.value === 'category') {
+                        const grouped = list.value.reduce((acc, item) => {
+                            (acc[item.category] = acc[item.category] || []).push(item); return acc;
+                        }, {});
+                        return Object.keys(grouped).sort().map(title => {
+                            const items = grouped[title];
+                            const byDate = items.reduce((acc, i) => { (acc[i.date] = acc[i.date] || []).push(i); return acc; }, {});
+                            const subGroups = Object.keys(byDate).sort().reverse().map(d => ({ 
+                                label: formatDate(d), 
+                                items: byDate[d],
+                                subTotal: byDate[d].reduce((s, i) => s + (i.cost * rate.value), 0)
+                            }));
+                            return { title, total: items.reduce((s, i) => s + (i.cost * rate.value), 0), subGroups };
+                        });
+                    } else {
+                        const grouped = list.value.reduce((acc, item) => {
+                            (acc[item.date] = acc[item.date] || []).push(item); return acc;
+                        }, {});
+                        return Object.keys(grouped).sort().reverse().map(date => {
+                            const items = grouped[date];
+                            const byCat = items.reduce((acc, i) => { (acc[i.category] = acc[i.category] || []).push(i); return acc; }, {});
+                            const subGroups = Object.keys(byCat).sort().map(c => ({ 
+                                label: c, 
+                                items: byCat[c],
+                                subTotal: byCat[c].reduce((s, i) => s + (i.cost * rate.value), 0)
+                            }));
+                            return { title: formatDate(date), total: items.reduce((s, i) => s + (i.cost * rate.value), 0), subGroups };
+                        });
+                    }
+                });
+
+                const addItem = () => {
+                    if (!newItem.value || !newCost.value) return;
+                    const cat = newCategory.value.trim() || 'General';
+                    if (editingId.value) {
+                        const index = list.value.findIndex(i => i.id === editingId.value);
+                        list.value[index] = { ...list.value[index], name: newItem.value, cost: Number(newCost.value), category: cat, date: newDate.value };
+                        editingId.value = null;
+                    } else {
+                        list.value.unshift({ id: Date.now(), name: newItem.value, cost: Number(newCost.value), category: cat, date: newDate.value });
+                    }
+                    newItem.value = ''; newCost.value = null;
+                    localStorage.setItem('lastCat', cat);
+                };
+
+                const editItem = (item) => {
+                    editingId.value = item.id;
+                    newItem.value = item.name; newCost.value = item.cost;
+                    newCategory.value = item.category; newDate.value = item.date;
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                };
+
+                const cancelEdit = () => { editingId.value = null; newItem.value = ''; newCost.value = null; };
+                const removeItem = (id) => { if(confirm("Delete this entry?")) list.value = list.value.filter(i => i.id !== id); };
+                
+                const clearAll = () => {
+                    if(confirm("Erase ALL trip data?")) {
+                        list.value = []; newCategory.value = ''; newItem.value = '';
+                        newCost.value = null; editingId.value = null;
+                        collapsedGroups.value = [];
+                        localStorage.removeItem('lastCat');
+                    }
+                };
+
+                const exportCSV = () => {
+                    let csv = `Date,Category,Item,Cost (${fromCurrency.value}),Converted (${toCurrency.value})\n`;
+                    list.value.forEach(i => csv += `${i.date},"${i.category}","${i.name}",${i.cost},${(i.cost * rate.value).toFixed(2)}\n`);
+                    const url = window.URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                    const a = document.createElement('a'); a.href = url; a.download = 'trip-expenses.csv'; a.click();
+                };
+
+                const totalConverted = computed(() => list.value.reduce((s, i) => s + (i.cost * rate.value), 0));
+                const formatDate = (d) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { month: 'short', day: 'numeric', weekday: 'short' });
+                const selectCategory = (c) => { newCategory.value = c; showDropdown.value = false; };
+                const handleBlur = () => setTimeout(() => showDropdown.value = false, 200);
+
+                watch(list, (v) => localStorage.setItem(STORAGE_KEY, JSON.stringify(v)), { deep: true });
+                onMounted(updateRates);
+
+                return { 
+                    fromCurrency, toCurrency, currencies, rate, list, viewMode, newItem, 
+                    newCost, newCategory, newDate, showDropdown, editingId, 
+                    existingCategories, activeData, addItem, editItem, cancelEdit, 
+                    removeItem, clearAll, exportCSV, totalConverted, formatDate, 
+                    selectCategory, handleBlur, updateRates, toggleCollapse, isCollapsed 
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
